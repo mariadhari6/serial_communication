@@ -87,6 +87,7 @@ public class Program
         Console.WriteLine("Transmission ended.");
         string allMessages = string.Join("\n", messageCollections);
         Console.WriteLine("All Messages:\n" + allMessages);
+        messageCollections.Clear();
         packetBuffer.Clear();
       }
       else
