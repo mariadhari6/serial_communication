@@ -97,17 +97,12 @@ public class Program
       running = false;
       return;
     }
-    //  [STX][TEXT][CR][ETX]
     byte STX = 2;
     byte ETX = 3;
     byte CR = 13;
-    byte[] textBytes = Encoding.UTF32.GetBytes(text);
-    byte[] packet = new byte[3 + textBytes.Length];
-    packet[0] = STX;
-    Array.Copy(textBytes, 0, packet, 1, textBytes.Length);
-    packet[1 + textBytes.Length] = CR;
-    packet[2 + textBytes.Length] = ETX;
-    sp.Write(packet, 0, packet.Length);
+    //  [STX][TEXT][CR][ETX]
+    List<byte> packet = [STX, .. Encoding.UTF32.GetBytes(text), CR, ETX];
+    sp.Write(packet.ToArray(), 0, packet.Count);
     Console.WriteLine("Sent text to Server: " + text.Trim());
   }
 }

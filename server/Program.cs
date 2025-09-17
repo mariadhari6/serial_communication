@@ -15,6 +15,7 @@ public class Program
 
   // Buffer untuk menampung data paket
   private static List<byte> packetBuffer = new List<byte>();
+  private static List<string> messageCollections = new List<string>();
 
   static void Main(string[] args)
   {
@@ -84,6 +85,8 @@ public class Program
       {
         Console.WriteLine("Received EOT from Client.");
         Console.WriteLine("Transmission ended.");
+        string allMessages = string.Join("\n", messageCollections);
+        Console.WriteLine("All Messages:\n" + allMessages);
         packetBuffer.Clear();
       }
       else
@@ -95,6 +98,7 @@ public class Program
           try
           {
             string text = PacketToText(packetBuffer.ToArray());
+            messageCollections.Add(text);
             Console.WriteLine("Data Received: " + text);
             sp.Write(new byte[] { ACK }, 0, 1);
             Console.WriteLine("Send ACK to Client.");
