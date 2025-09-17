@@ -61,7 +61,7 @@ public class Program
     byte[] textBytes = new byte[textLength];
     Array.Copy(packet, 1, textBytes, 0, textLength);
 
-    return Encoding.Latin1.GetString(textBytes);
+    return Encoding.UTF32.GetString(textBytes);
   }
 
   private static void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e)
