@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 using System.IO.Ports;
 using DotNetEnv;
 using System.Collections.Generic;
@@ -60,7 +61,7 @@ public class Program
     byte[] textBytes = new byte[textLength];
     Array.Copy(packet, 1, textBytes, 0, textLength);
 
-    return System.Text.Encoding.UTF8.GetString(textBytes);
+    return Encoding.Latin1.GetString(textBytes);
   }
 
   private static void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e)
