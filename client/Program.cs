@@ -101,7 +101,7 @@ public class Program
     byte STX = 2;
     byte ETX = 3;
     byte CR = 13;
-    byte[] textBytes = System.Text.Encoding.ASCII.GetBytes(text);
+    byte[] textBytes = System.Text.Encoding.UTF8.GetBytes(text);
     byte[] packet = new byte[3 + textBytes.Length];
     packet[0] = STX;
     Array.Copy(textBytes, 0, packet, 1, textBytes.Length);

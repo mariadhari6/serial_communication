@@ -60,7 +60,7 @@ public class Program
     byte[] textBytes = new byte[textLength];
     Array.Copy(packet, 1, textBytes, 0, textLength);
 
-    return System.Text.Encoding.ASCII.GetString(textBytes);
+    return System.Text.Encoding.UTF8.GetString(textBytes);
   }
 
   private static void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e)
