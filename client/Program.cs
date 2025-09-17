@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO.Ports;
 
+using DotNetEnv;
 public class Program
 {
 
@@ -20,13 +21,22 @@ public class Program
   private static bool running = true;
   public static void Main(string[] args)
   {
+
+    // Load env variable
+    DotNetEnv.Env.Load();
+    string portName = Environment.GetEnvironmentVariable("SERIAL_PORT") ?? "/dev/pts/1";
+    int baudRate = int.Parse(Environment.GetEnvironmentVariable("BAUD_RATE") ?? "9600");
+    int dataBits = int.Parse(Environment.GetEnvironmentVariable("DATA_BITS") ?? "8");
+
+  
     SerialPort serialPort = new SerialPort();
-    serialPort.PortName = "/dev/pts/1";
-    serialPort.BaudRate = 9600;
+    serialPort.PortName = portName;
+    serialPort.BaudRate = baudRate;
     serialPort.Parity = Parity.None;
-    serialPort.DataBits = 8;
+    serialPort.DataBits = dataBits;
     serialPort.StopBits = StopBits.One;
     serialPort.Handshake = Handshake.None;
+    
 
     serialPort.DataReceived += new SerialDataReceivedEventHandler(ACKReceiveHandler);
 
