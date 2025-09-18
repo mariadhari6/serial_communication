@@ -12,6 +12,7 @@ public class Program
   private static byte ETX = 3;
   private static byte CR = 13;
   private static byte EOT = 4;
+  private static byte ETB = 23;
 
   // Buffer untuk menampung data paket
   private static List<byte> packetBuffer = new List<byte>();
@@ -48,21 +49,41 @@ public class Program
     }
   }
 
-  private static string PacketToText(byte[] packet)
+  private static string PacketToText(byte[] packet, bool tailed = false)
   {
     Console.WriteLine("Packet Length: " + packet.Length);
-    if (packet.Length < 4 || packet[0] != STX || packet[^1] != ETX)
+    if (packet[0] != STX)
+    {
+      throw new ArgumentException("Packet must start with STX");
+    }
+    if (tailed && packet.Length < 3 || packet[^1] != ETB)
+    {
       throw new ArgumentException("Invalid packet format");
-
-    int crIndex = Array.IndexOf(packet, CR, 1);
-    if (crIndex == -1 || crIndex != packet.Length - 2)
+    }
+    if (!tailed && packet.Length < 4 || packet[^1] != ETX)
+    {
       throw new ArgumentException("Invalid packet format");
+    }
 
-    int textLength = crIndex - 1;
-    byte[] textBytes = new byte[textLength];
-    Array.Copy(packet, 1, textBytes, 0, textLength);
+    if (!tailed)
+    {
 
-    return Encoding.UTF32.GetString(textBytes);
+      int crIndex = Array.IndexOf(packet, CR, 1);
+      if (crIndex == -1 || crIndex != packet.Length - 2)
+        throw new ArgumentException("Invalid packet format");
+
+      int textLength = crIndex - 1;
+      byte[] textBytes = new byte[textLength];
+      Array.Copy(packet, 1, textBytes, 0, textLength);
+
+      return Encoding.UTF32.GetString(textBytes);
+    }
+    else
+    {
+      int textLength = packet.Length - 2;
+      List<byte> textBytes = [.. packet[1..(1 + textLength)]];
+      return Encoding.UTF32.GetString([.. textBytes]);
+    }
   }
 
   private static void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e)
@@ -101,6 +122,24 @@ public class Program
             string text = PacketToText(packetBuffer.ToArray());
             messageCollections.Add(text);
             Console.WriteLine("Data Received: " + text);
+            sp.Write(new byte[] { ACK }, 0, 1);
+            Console.WriteLine("Send ACK to Client.");
+          }
+          catch (Exception ex)
+          {
+            Console.WriteLine("Packet error: " + ex.Message);
+          }
+          packetBuffer.Clear();
+        }
+
+        else if (b == ETB && packetBuffer.Count >= 3 && packetBuffer[0] == STX)
+        {
+          try
+          {
+            string text = PacketToText(packetBuffer.ToArray(), tailed: true);
+            // messageCollections.Add(text);
+            messageCollections[^1] += text; // Append to last message
+            Console.WriteLine("Data Received (Tailed): " + text);
             sp.Write(new byte[] { ACK }, 0, 1);
             Console.WriteLine("Send ACK to Client.");
           }
