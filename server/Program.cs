@@ -16,6 +16,7 @@ public class Program
 
   // Buffer untuk menampung data paket
   private static List<byte> packetBuffer = new List<byte>();
+  private static string currentMessage = "";
   private static List<string> messageCollections = new List<string>();
 
   static void Main(string[] args)
@@ -56,11 +57,11 @@ public class Program
     {
       throw new ArgumentException("Packet must start with STX");
     }
-    if (tailed && packet.Length < 3 || packet[^1] != ETB)
+    if (tailed && (packet.Length < 3 || packet[^1] != ETB))
     {
-      throw new ArgumentException("Invalid packet format");
+      throw new ArgumentException("Invalid packet format (tailed)");
     }
-    if (!tailed && packet.Length < 4 || packet[^1] != ETX)
+    if (!tailed && (packet.Length < 4 || packet[^1] != ETX))
     {
       throw new ArgumentException("Invalid packet format");
     }
@@ -119,11 +120,12 @@ public class Program
         {
           try
           {
-            string text = PacketToText(packetBuffer.ToArray());
+            string text = currentMessage + PacketToText(packetBuffer.ToArray());
             messageCollections.Add(text);
             Console.WriteLine("Data Received: " + text);
             sp.Write(new byte[] { ACK }, 0, 1);
             Console.WriteLine("Send ACK to Client.");
+            currentMessage = "";
           }
           catch (Exception ex)
           {
@@ -137,9 +139,8 @@ public class Program
           try
           {
             string text = PacketToText(packetBuffer.ToArray(), tailed: true);
-            // messageCollections.Add(text);
-            messageCollections[^1] += text; // Append to last message
             Console.WriteLine("Data Received (Tailed): " + text);
+            currentMessage += text;
             sp.Write(new byte[] { ACK }, 0, 1);
             Console.WriteLine("Send ACK to Client.");
           }
