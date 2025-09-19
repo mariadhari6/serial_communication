@@ -28,7 +28,7 @@ public class Program
   private static int lastPartition = partition;
 
   private static readonly int maxCharactersPerLine = 50;
-  private static int sequence = 0;
+  private static int sequence = 1;
 
   private static readonly int MAX_SEQUENCE = 7;
 
@@ -203,10 +203,5 @@ public class Program
     {
       sequence = 0;
     }
-  }
-
-  private static object Random()
-  {
-    throw new NotImplementedException();
   }
 }
