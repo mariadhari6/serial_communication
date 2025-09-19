@@ -24,6 +24,92 @@ public class Program
   private static readonly byte CR = 13;
   private static readonly byte LF = 10;
   private static readonly byte NAK = 21;
+  public enum Mode
+  {
+    SumMod256, // umum untuk ASTM
+    Xor        // beberapa perangkat pakai BCC (XOR)
+  }
+  private static bool IsValidChecksumAscii(byte[] packet, byte endtx, Mode mode = Mode.SumMod256, bool includeEndTx = true)
+  {
+    if (packet is null || packet.Length == 0) return false;
+
+    int indexSTX = Array.IndexOf(packet, STX);
+    if (indexSTX < 0) return false;
+
+    int indexENDTX = Array.IndexOf(packet, endtx, indexSTX + 1);
+    if (indexENDTX < 0) return false;
+
+    // --- Coba format 2 digit ASCII hex ---
+    if (indexENDTX + 2 < packet.Length &&
+        IsHexAscii(packet[indexENDTX + 1]) &&
+        IsHexAscii(packet[indexENDTX + 2]))
+    {
+      string received = Encoding.ASCII.GetString(packet, indexENDTX + 1, 2);
+      string calculated = GenerateChecksumAscii(packet, endtx, mode, includeEndTx);
+      // Debug (opsional)
+      // Console.WriteLine($"Rx: {received}, Calc: {calculated}");
+      return received.Equals(calculated, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // --- Fallback: 1 byte biner checksum setelah ENDTX ---
+    if (indexENDTX + 1 < packet.Length)
+    {
+      byte receivedByte = packet[indexENDTX + 1];
+      // Hitung byte checksum
+      int acc = 0;
+      int start = indexSTX + 1;
+      int end = includeEndTx ? indexENDTX : indexENDTX - 1;
+      if (end < start) return false;
+
+      if (mode == Mode.Xor)
+      {
+        for (int i = start; i <= end; i++) acc ^= packet[i];
+      }
+      else
+      {
+        for (int i = start; i <= end; i++) acc = (acc + packet[i]) & 0xFF;
+      }
+
+      return receivedByte == (byte)(acc & 0xFF);
+    }
+
+    return false;
+  }
+
+  private static bool IsHexAscii(byte b) =>
+      (b >= (byte)'0' && b <= (byte)'9') ||
+      (b >= (byte)'A' && b <= (byte)'F') ||
+      (b >= (byte)'a' && b <= (byte)'f');
+
+  private static string GenerateChecksumAscii(byte[] packet, byte endtx, Mode mode = Mode.SumMod256, bool includeEndTx = true)
+  {
+
+    ArgumentNullException.ThrowIfNull(packet);
+
+    int indexSTX = Array.IndexOf(packet, STX);
+    if (indexSTX < 0) throw new ArgumentException("STX not found", nameof(packet));
+
+    // Cari ENDTX SETELAH STX
+    int indexENDTX = Array.IndexOf(packet, endtx, indexSTX + 1);
+    if (indexENDTX < 0) throw new ArgumentException("ENDTX not found", nameof(packet));
+
+    int start = indexSTX + 1;
+    int end = includeEndTx ? indexENDTX : indexENDTX - 1;
+    if (end < start) throw new ArgumentException("Invalid packet window");
+
+    int acc = mode == Mode.Xor ? 0 : 0;
+    for (int i = start; i <= end; i++)
+    {
+      if (mode == Mode.Xor)
+        acc ^= packet[i];
+      else
+        acc = (acc + packet[i]) & 0xFF; // low 8-bit sum
+    }
+
+    if (mode == Mode.SumMod256) acc &= 0xFF;
+    return acc.ToString("X2"); // 2 digit hex uppercase
+  }
+
   private static int partition = 0;
   private static int lastPartition = partition;
 
@@ -175,13 +261,15 @@ public class Program
     {
       // [STX][TEXT][ETB]
       packet = [STX, (byte)currentSequence, .. content, ETB];
-      checkSum = GenerateCheckSum([.. packet], ETB);
+      // checkSum = GenerateCheckSum([.. packet], ETB);
+      checkSum = GenerateChecksumAscii(packet.ToArray(), ETB, Mode.SumMod256, true);
     }
     else
     {
       // [STX][TEXT][CR][ETX]
       packet = [STX, (byte)currentSequence, .. content, CR, ETX];
-      checkSum = GenerateCheckSum([.. packet], ETX);
+      checkSum = GenerateChecksumAscii(packet.ToArray(), ETX, Mode.SumMod256, true);
+      // checkSum = GenerateCheckSum([.. packet], ETX);
     }
     if (simulationMode && new Random().Next(0, 2) == 0)
     {

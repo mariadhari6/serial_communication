@@ -18,11 +18,97 @@ public class Program
   private static readonly int MAX_SEQUENCE = 7;
   private static int nextSequence = 1;
 
-
   // Buffer untuk menampung data paket
   private static readonly List<byte> packetBuffer = new List<byte>();
   private static string currentMessage = "";
   private static readonly List<string> messageCollections = new List<string>();
+
+  public enum Mode
+  {
+    SumMod256, // umum untuk ASTM
+    Xor        // beberapa perangkat pakai BCC (XOR)
+  }
+
+  private static bool IsValidChecksumAscii(byte[] packet, byte endtx, Mode mode = Mode.SumMod256, bool includeEndTx = true)
+  {
+    if (packet is null || packet.Length == 0) return false;
+
+    int indexSTX = Array.IndexOf(packet, STX);
+    if (indexSTX < 0) return false;
+
+    int indexENDTX = Array.IndexOf(packet, endtx, indexSTX + 1);
+    if (indexENDTX < 0) return false;
+
+    // --- Coba format 2 digit ASCII hex ---
+    if (indexENDTX + 2 < packet.Length &&
+        IsHexAscii(packet[indexENDTX + 1]) &&
+        IsHexAscii(packet[indexENDTX + 2]))
+    {
+      string received = Encoding.ASCII.GetString(packet, indexENDTX + 1, 2);
+      string calculated = GenerateChecksumAscii(packet, endtx, mode, includeEndTx);
+      // Debug (opsional)
+      // Console.WriteLine($"Rx: {received}, Calc: {calculated}");
+      return received.Equals(calculated, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // --- Fallback: 1 byte biner checksum setelah ENDTX ---
+    if (indexENDTX + 1 < packet.Length)
+    {
+      byte receivedByte = packet[indexENDTX + 1];
+      // Hitung byte checksum
+      int acc = 0;
+      int start = indexSTX + 1;
+      int end = includeEndTx ? indexENDTX : indexENDTX - 1;
+      if (end < start) return false;
+
+      if (mode == Mode.Xor)
+      {
+        for (int i = start; i <= end; i++) acc ^= packet[i];
+      }
+      else
+      {
+        for (int i = start; i <= end; i++) acc = (acc + packet[i]) & 0xFF;
+      }
+
+      return receivedByte == (byte)(acc & 0xFF);
+    }
+
+    return false;
+  }
+
+  private static bool IsHexAscii(byte b) =>
+      (b >= (byte)'0' && b <= (byte)'9') ||
+      (b >= (byte)'A' && b <= (byte)'F') ||
+      (b >= (byte)'a' && b <= (byte)'f');
+
+  private static string GenerateChecksumAscii(byte[] packet, byte endtx, Mode mode = Mode.SumMod256, bool includeEndTx = true)
+  {
+
+    ArgumentNullException.ThrowIfNull(packet);
+
+    int indexSTX = Array.IndexOf(packet, STX);
+    if (indexSTX < 0) throw new ArgumentException("STX not found", nameof(packet));
+
+    // Cari ENDTX SETELAH STX
+    int indexENDTX = Array.IndexOf(packet, endtx, indexSTX + 1);
+    if (indexENDTX < 0) throw new ArgumentException("ENDTX not found", nameof(packet));
+
+    int start = indexSTX + 1;
+    int end = includeEndTx ? indexENDTX : indexENDTX - 1;
+    if (end < start) throw new ArgumentException("Invalid packet window");
+
+    int acc = mode == Mode.Xor ? 0 : 0;
+    for (int i = start; i <= end; i++)
+    {
+      if (mode == Mode.Xor)
+        acc ^= packet[i];
+      else
+        acc = (acc + packet[i]) & 0xFF; // low 8-bit sum
+    }
+
+    if (mode == Mode.SumMod256) acc &= 0xFF;
+    return acc.ToString("X2"); // 2 digit hex uppercase
+  }
 
   static void Main(string[] args)
   {
@@ -149,11 +235,8 @@ public class Program
     string receivedCheckSum = Encoding.UTF8.GetString([.. checkSumBytes]);
     string calculatedCheckSum = GenerateCheckSum(packet, endtx);
 
-    if (receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase))
-    {
-      Console.WriteLine("Received Checksum: " + receivedCheckSum);
-      Console.WriteLine("Calculated Checksum: " + calculatedCheckSum);
-    }
+    Console.WriteLine("Received Checksum: " + receivedCheckSum);
+    Console.WriteLine("Calculated Checksum: " + calculatedCheckSum);
     return receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase);
   }
   private static void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e)
@@ -209,9 +292,17 @@ public class Program
               Console.WriteLine("Send NAK to Client.");
               return;
             }
-            if (!IsValidChecksum([.. packetBuffer], endTx))
+            // if (!IsValidChecksum([.. packetBuffer], endTx))
+            // {
+            //   Console.WriteLine("Invalid checksum.");
+            //   packetBuffer.Clear();
+            //   // sp.Write(new byte[] { NAK }, 0, 1);
+            //   Console.WriteLine("Send NAK to Client.");
+            //   return;
+            // }
+            if (!IsValidChecksumAscii([.. packetBuffer], endTx, Mode.SumMod256, includeEndTx: true))
             {
-              Console.WriteLine("Invalid checksum.");
+              Console.WriteLine("Invalid ASCII checksum.");
               packetBuffer.Clear();
               // sp.Write(new byte[] { NAK }, 0, 1);
               Console.WriteLine("Send NAK to Client.");
