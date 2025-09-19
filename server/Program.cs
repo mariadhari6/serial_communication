@@ -130,6 +130,32 @@ public class Program
   {
     return (int)sequence == nextSequence;
   }
+  private static string GenerateCheckSum(byte[] packet, byte endtx)
+  {
+    int indexSTX = Array.IndexOf(packet, STX);
+    int indexENDTX = Array.IndexOf(packet, endtx);
+    if (indexSTX == -1 || indexENDTX == -1 || indexENDTX <= indexSTX)
+    {
+      throw new ArgumentException("Invalid packet format");
+    }
+    List<byte> contentBytes = [.. packet[(indexSTX + 1)..indexENDTX]];
+    string checkSum = (contentBytes.Count % 256).ToString("X2");
+    return checkSum;
+  }
+  private static bool IsValidChecksum(byte[] packet, byte endtx)
+  {
+    int indexENDTX = Array.IndexOf(packet, endtx);
+    List<byte> checkSumBytes = [.. packet.ToArray().Skip(indexENDTX + 1).Take(2)];
+    string receivedCheckSum = Encoding.UTF8.GetString([.. checkSumBytes]);
+    string calculatedCheckSum = GenerateCheckSum(packet, endtx);
+
+    if (receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase))
+    {
+      Console.WriteLine("Received Checksum: " + receivedCheckSum);
+      Console.WriteLine("Calculated Checksum: " + calculatedCheckSum);
+    }
+    return receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase);
+  }
   private static void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e)
   {
     SerialPort sp = (SerialPort)sender;
@@ -159,7 +185,7 @@ public class Program
       {
         packetBuffer.Add(b);
 
-        // Jika sudah menerima ETX, proses paket
+        // Jika sudah menerima CR & LF, proses paket
         if (b == LF)
         {
           try
@@ -183,7 +209,15 @@ public class Program
               Console.WriteLine("Send NAK to Client.");
               return;
             }
-            string text = ExtractText(packetBuffer.ToArray(), tailed: endTx == ETB);
+            if (!IsValidChecksum([.. packetBuffer], endTx))
+            {
+              Console.WriteLine("Invalid checksum.");
+              packetBuffer.Clear();
+              // sp.Write(new byte[] { NAK }, 0, 1);
+              Console.WriteLine("Send NAK to Client.");
+              return;
+            }
+            string text = ExtractText([.. packetBuffer], tailed: endTx == ETB);
             if (endTx == ETB)
             {
               Console.WriteLine("Data Received (Tailed): " + text);
@@ -203,7 +237,7 @@ public class Program
               packetBuffer.Clear();
               sp.Write(new byte[] { ACK }, 0, 1);
               Console.WriteLine("Send ACK to Client.");
-              
+
               nextSequence = (nextSequence + 1) % (MAX_SEQUENCE + 1);
             }
           }
