@@ -7,9 +7,9 @@ public class Program
 {
 
   private static readonly string TEXT = """
+  Hello Morasaurus
   Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec eget laoreet eros. 
   Halo Dunia
-  Hello Morasaurus
   Hello Dinosaurus
   こんにちは世界
   你好，世界
