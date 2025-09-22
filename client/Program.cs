@@ -3,6 +3,10 @@ using System.IO.Ports;
 using System.Text;
 using DotNetEnv;
 using System.Reflection.Metadata;
+using Serilog;
+
+
+
 public class Program
 {
 
@@ -15,11 +19,9 @@ public class Program
   // 你好，世界
   // """;
   private static readonly string TEXT = """
-  Halo Dunia
-  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc scelerisque nisl ac eleifend facilisis. Aliquam sollicitudin eget eros in facilisis. Proin ullamcorper turpis vitae tempus ultrices. Donec justo felis, bibendum at neque vitae, interdum ornare enim. Pellentesque venenatis fringilla commodo. Donec a ligula pellentesque, condimentum tellus pulvinar, vulputate odio. Aenean malesuada sapien turpis, nec hendrerit sem dictum vel.
-  Hello Morasaurus
-  Hello Dinosaurus
-  """;
+                                        Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+                                        World Hello
+                                        """;
   private static readonly byte ENQ = 5;
   private static readonly byte ACK = 6;
   private static readonly byte ETB = 23;
@@ -125,10 +127,66 @@ public class Program
     return acc.ToString("X2"); // 2 digit hex uppercase
   }
 
+  private static void LogPacket(byte[] packet)
+  {
+    int indexETX = Array.IndexOf(packet, ETX);
+    int indexETB = Array.IndexOf(packet, ETB);
+    int indexSequence = Array.IndexOf(packet, STX) + 1;
+    int indexCR = Array.IndexOf(packet, CR);
+    List<byte> CRLFBytes = [.. packet.ToArray().Skip(packet.Length - 2).Take(2)];
+    List<byte> checkSumBytes = [.. packet.ToArray().Skip(Math.Max(indexETX, indexETB) + 1).Take(2)];
+    List<byte> contentBytes = [.. packet.ToArray().Skip(indexSequence + 1).Take((indexCR > 0 ? indexCR : Math.Max(indexETX, indexETB)) - indexSequence - 1)];
+    byte sequenceByte = packet[indexSequence];
+    string content = Encoding.UTF32.GetString([.. contentBytes]);
+    string checkSum = Encoding.ASCII.GetString([.. checkSumBytes]);
+    Log.Information("=== Packet Details ===");
+    Log.Information("Sequence: " + sequenceByte);
+    Log.Information("Content: " + content.Trim());
+    Log.Information("CRLF: " + BitConverter.ToString([.. CRLFBytes.ToArray()]).Replace("-", " "));
+    Log.Information("Checksum: " + checkSum);
+  }
+  private static bool IsValidChecksum(byte[] packet, byte endtx)
+  {
+    if (packet[^2] != CR || packet[^1] != LF)
+    {
+      return false;
+    }
+    int indexLastCR = Array.LastIndexOf(packet, CR);
+    int indexENDTX = Array.IndexOf(packet, endtx);
+    // List<byte> checkSumBytes = [.. packet.ToArray().Skip(indexENDTX + 1).Take(2)];
+    List<byte> checkSumBytes = [.. packet.ToArray().Skip(indexENDTX + 1).Take(indexLastCR - indexENDTX - 1)];
+    string receivedCheckSum = Encoding.ASCII.GetString([.. checkSumBytes]);
+    string calculatedCheckSum = GenerateCheckSum(packet, endtx);
+
+
+
+    if (!receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase))
+    {
+      if (endtx == ETX)
+      {
+        Console.WriteLine("Error in ETX packet");
+      }
+      else
+      {
+        Console.WriteLine("Error in ETB packet");
+      }
+      Console.WriteLine("Count Received Checksum Bytes: " + checkSumBytes.Count);
+      Console.WriteLine("Received Checksum: " + receivedCheckSum);
+      Console.WriteLine("Calculated Checksum: " + calculatedCheckSum);
+    }
+    return receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase);
+  }
   public static void Main(string[] args)
   {
 
     // Load env variable
+    Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning) // Reduce framework noise
+    .WriteTo.Console()
+    .WriteTo.File("logs/myapp-.txt", rollingInterval: RollingInterval.Day) // Log to a daily rotating file
+    .CreateLogger();
+
     Env.Load();
     string portName = Environment.GetEnvironmentVariable("SERIAL_PORT") ?? "/dev/pts/1";
     int baudRate = int.Parse(Environment.GetEnvironmentVariable("BAUD_RATE") ?? "9600");
@@ -234,7 +292,10 @@ public class Program
       throw new ArgumentException("Invalid packet format");
     }
     List<byte> contentBytes = [.. packet[(indexSTX + 1)..indexENDTX]];
-    string checkSum = (contentBytes.Count % 256).ToString("X2");
+    int total = contentBytes.Sum(c => (int)c);
+    Console.WriteLine("Sum of bytes: " + total);
+    Console.WriteLine("Modulo 256: " + (total % 256));
+    string checkSum = (total % 256).ToString("X2");
     return checkSum;
   }
   private static void SendText(SerialPort sp)
@@ -259,6 +320,7 @@ public class Program
     string checkSum;
     bool simulationMode = Environment.GetEnvironmentVariable("SIMULATION_MODE") == "true";
     int currentSequence = sequence;
+    byte endtx = partition > 0 ? ETB : ETX;
     if (simulationMode && new Random().Next(0, 2) == 0)
     {
       // simulate error by changing sequence number to 9
@@ -266,21 +328,20 @@ public class Program
       currentSequence = 9;
       Console.WriteLine("Simulation mode: sending wrong sequence number");
     }
+
     if (partition > 0)
     {
       // [STX][TEXT][ETB]
-      packet = [STX, (byte)currentSequence, .. content, ETB];
-      // checkSum = GenerateCheckSum([.. packet], ETB);
-      checkSum = GenerateChecksumAscii(packet.ToArray(), ETB, Mode.SumMod256, true);
+      packet = [STX, (byte)currentSequence, .. content, endtx];
+      checkSum = GenerateCheckSum([.. packet], endtx);
     }
     else
     {
       // [STX][TEXT][CR][ETX]
-      packet = [STX, (byte)currentSequence, .. content, CR, ETX];
+      packet = [STX, (byte)currentSequence, .. content, CR, endtx];
       Console.WriteLine("Generate Checksum FOR ETX");
-      checkSum = GenerateChecksumAscii(packet.ToArray(), ETX, Mode.SumMod256, true);
+      checkSum = GenerateCheckSum([.. packet], endtx);
       Console.WriteLine("Checksum: " + checkSum);
-      // checkSum = GenerateCheckSum([.. packet], ETX);
     }
 
     if (simulationMode && new Random().Next(0, 2) == 0)
@@ -290,10 +351,15 @@ public class Program
       Console.WriteLine("Simulation mode: sending wrong checksum");
     }
 
-    byte[] checkSumBytes = Encoding.UTF8.GetBytes(checkSum);
+    // List<string> checkSumList = [checkSum[0].ToString(), checkSum[1].ToString()];
+    // byte[] checkSumBytes = checkSumList.Select(s => (byte)s[0]).ToArray();
+
+    byte[] checkSumBytes = Encoding.ASCII.GetBytes(checkSum);
     packet.AddRange([.. checkSumBytes, CR, LF]);
+    IsValidChecksum([.. packet], endtx);
 
     sp.Write(packet.ToArray(), 0, packet.Count);
+    LogPacket(packet.ToArray());
     Console.WriteLine("Sent text to Server: " + text.Trim());
     if (sequence < MAX_SEQUENCE)
     {
