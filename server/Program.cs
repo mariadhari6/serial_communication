@@ -44,8 +44,11 @@ public class Program
         IsHexAscii(packet[indexENDTX + 1]) &&
         IsHexAscii(packet[indexENDTX + 2]))
     {
+      Console.WriteLine("Using 2-digit ASCII hex checksum validation.");
+      
       string received = Encoding.ASCII.GetString(packet, indexENDTX + 1, 2);
       string calculated = GenerateChecksumAscii(packet, endtx, mode, includeEndTx);
+      Console.WriteLine($"Received Checksum: {received}, Calculated Checksum: {calculated}");
       // Debug (opsional)
       // Console.WriteLine($"Rx: {received}, Calc: {calculated}");
       return received.Equals(calculated, StringComparison.OrdinalIgnoreCase);

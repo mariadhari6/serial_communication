@@ -6,13 +6,19 @@ using System.Reflection.Metadata;
 public class Program
 {
 
+  // private static readonly string TEXT = """
+  // Hello Morasaurus
+  // Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec eget laoreet eros.
+  // Halo Dunia
+  // Hello Dinosaurus
+  // こんにちは世界
+  // 你好，世界
+  // """;
   private static readonly string TEXT = """
-  Hello Morasaurus
-  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec eget laoreet eros. 
   Halo Dunia
+  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc scelerisque nisl ac eleifend facilisis. Aliquam sollicitudin eget eros in facilisis. Proin ullamcorper turpis vitae tempus ultrices. Donec justo felis, bibendum at neque vitae, interdum ornare enim. Pellentesque venenatis fringilla commodo. Donec a ligula pellentesque, condimentum tellus pulvinar, vulputate odio. Aenean malesuada sapien turpis, nec hendrerit sem dictum vel.
+  Hello Morasaurus
   Hello Dinosaurus
-  こんにちは世界
-  你好，世界
   """;
   private static readonly byte ENQ = 5;
   private static readonly byte ACK = 6;
@@ -24,6 +30,15 @@ public class Program
   private static readonly byte CR = 13;
   private static readonly byte LF = 10;
   private static readonly byte NAK = 21;
+  private static int partition = 0;
+  private static int lastPartition = partition;
+  private static readonly int maxCharactersPerLine = 50;
+  private static int sequence = 1;
+
+  private static readonly int MAX_SEQUENCE = 7;
+
+  private static bool running = true;
+
   public enum Mode
   {
     SumMod256, // umum untuk ASTM
@@ -110,15 +125,6 @@ public class Program
     return acc.ToString("X2"); // 2 digit hex uppercase
   }
 
-  private static int partition = 0;
-  private static int lastPartition = partition;
-
-  private static readonly int maxCharactersPerLine = 50;
-  private static int sequence = 1;
-
-  private static readonly int MAX_SEQUENCE = 7;
-
-  private static bool running = true;
   public static void Main(string[] args)
   {
 
@@ -207,6 +213,8 @@ public class Program
         // split string each maxCharactersPerLine characters
         text = lines[line].Substring(startIndex, Math.Min(maxCharactersPerLine, lines[line].Length - startIndex));
         partition++;
+        Console.WriteLine("Total partition: " + totalPartition);
+        Console.WriteLine("Current partition: " + partition);
         if (partition >= totalPartition)
         {
           line++;
@@ -232,6 +240,7 @@ public class Program
   private static void SendText(SerialPort sp)
   {
     string? text = GetText();
+    Console.WriteLine("Partition: " + partition + ", Sequence: " + sequence);
 
     if (text == null)
     {
@@ -268,9 +277,12 @@ public class Program
     {
       // [STX][TEXT][CR][ETX]
       packet = [STX, (byte)currentSequence, .. content, CR, ETX];
+      Console.WriteLine("Generate Checksum FOR ETX");
       checkSum = GenerateChecksumAscii(packet.ToArray(), ETX, Mode.SumMod256, true);
+      Console.WriteLine("Checksum: " + checkSum);
       // checkSum = GenerateCheckSum([.. packet], ETX);
     }
+
     if (simulationMode && new Random().Next(0, 2) == 0)
     {
       // simulate error by changing checksum to "FF"
