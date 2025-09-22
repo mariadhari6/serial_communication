@@ -78,6 +78,12 @@ public class Program
     return receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase);
   }
 
+  private static void Reset()
+  {
+    partition = 0;
+    lastPartition = partition;
+    sequence = 1;
+  }
   public static void Main(string[] args)
   {
 
@@ -199,7 +205,7 @@ public class Program
     byte[] contentBytes = packet[(indexSTX + 1)..indexENDTX];
 
     int total = contentBytes.Sum(c => (int)c);
-    string checkSum = (total % 256).ToString("X2"); // ✅ always 2-digit uppercase hex
+    string checkSum = (total % 256).ToString("X2");
     return checkSum;
   }
 
@@ -215,6 +221,7 @@ public class Program
       sp.Write(new byte[] { EOT }, 0, 1);
       Console.WriteLine("Send EOT to Server.");
       sp.Close();
+      Reset();
       // Stop the program
       running = false;
       return;

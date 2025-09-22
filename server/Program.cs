@@ -3,6 +3,7 @@ using System.Text;
 using System.IO.Ports;
 using DotNetEnv;
 using System.Collections.Generic;
+using Serilog;
 
 public class Program
 {
@@ -23,98 +24,17 @@ public class Program
   private static string currentMessage = "";
   private static readonly List<string> messageCollections = new List<string>();
 
-  public enum Mode
-  {
-    SumMod256, // umum untuk ASTM
-    Xor        // beberapa perangkat pakai BCC (XOR)
-  }
 
-  private static bool IsValidChecksumAscii(byte[] packet, byte endtx, Mode mode = Mode.SumMod256, bool includeEndTx = true)
-  {
-    if (packet is null || packet.Length == 0) return false;
-
-    int indexSTX = Array.IndexOf(packet, STX);
-    if (indexSTX < 0) return false;
-
-    int indexENDTX = Array.IndexOf(packet, endtx, indexSTX + 1);
-    if (indexENDTX < 0) return false;
-
-    // --- Coba format 2 digit ASCII hex ---
-    if (indexENDTX + 2 < packet.Length &&
-        IsHexAscii(packet[indexENDTX + 1]) &&
-        IsHexAscii(packet[indexENDTX + 2]))
-    {
-      Console.WriteLine("Using 2-digit ASCII hex checksum validation.");
-      
-      string received = Encoding.ASCII.GetString(packet, indexENDTX + 1, 2);
-      string calculated = GenerateChecksumAscii(packet, endtx, mode, includeEndTx);
-      Console.WriteLine($"Received Checksum: {received}, Calculated Checksum: {calculated}");
-      // Debug (opsional)
-      // Console.WriteLine($"Rx: {received}, Calc: {calculated}");
-      return received.Equals(calculated, StringComparison.OrdinalIgnoreCase);
-    }
-
-    // --- Fallback: 1 byte biner checksum setelah ENDTX ---
-    if (indexENDTX + 1 < packet.Length)
-    {
-      byte receivedByte = packet[indexENDTX + 1];
-      // Hitung byte checksum
-      int acc = 0;
-      int start = indexSTX + 1;
-      int end = includeEndTx ? indexENDTX : indexENDTX - 1;
-      if (end < start) return false;
-
-      if (mode == Mode.Xor)
-      {
-        for (int i = start; i <= end; i++) acc ^= packet[i];
-      }
-      else
-      {
-        for (int i = start; i <= end; i++) acc = (acc + packet[i]) & 0xFF;
-      }
-
-      return receivedByte == (byte)(acc & 0xFF);
-    }
-
-    return false;
-  }
-
-  private static bool IsHexAscii(byte b) =>
-      (b >= (byte)'0' && b <= (byte)'9') ||
-      (b >= (byte)'A' && b <= (byte)'F') ||
-      (b >= (byte)'a' && b <= (byte)'f');
-
-  private static string GenerateChecksumAscii(byte[] packet, byte endtx, Mode mode = Mode.SumMod256, bool includeEndTx = true)
-  {
-
-    ArgumentNullException.ThrowIfNull(packet);
-
-    int indexSTX = Array.IndexOf(packet, STX);
-    if (indexSTX < 0) throw new ArgumentException("STX not found", nameof(packet));
-
-    // Cari ENDTX SETELAH STX
-    int indexENDTX = Array.IndexOf(packet, endtx, indexSTX + 1);
-    if (indexENDTX < 0) throw new ArgumentException("ENDTX not found", nameof(packet));
-
-    int start = indexSTX + 1;
-    int end = includeEndTx ? indexENDTX : indexENDTX - 1;
-    if (end < start) throw new ArgumentException("Invalid packet window");
-
-    int acc = mode == Mode.Xor ? 0 : 0;
-    for (int i = start; i <= end; i++)
-    {
-      if (mode == Mode.Xor)
-        acc ^= packet[i];
-      else
-        acc = (acc + packet[i]) & 0xFF; // low 8-bit sum
-    }
-
-    if (mode == Mode.SumMod256) acc &= 0xFF;
-    return acc.ToString("X2"); // 2 digit hex uppercase
-  }
 
   static void Main(string[] args)
   {
+    Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning) // Reduce framework noise
+    .WriteTo.Console()
+    .WriteTo.File("logs/myapp-.txt", rollingInterval: RollingInterval.Day) // Log to a daily rotating file
+    .CreateLogger();
+
     Env.Load();
     string portName = Environment.GetEnvironmentVariable("SERIAL_PORT") ?? "/dev/pts/2";
     int baudRate = int.Parse(Environment.GetEnvironmentVariable("BAUD_RATE") ?? "9600");
@@ -144,43 +64,18 @@ public class Program
     }
   }
 
-  private static string PacketToText(byte[] packet, bool tailed = false)
+  private static void Reset()
   {
-    Console.WriteLine("Packet Length: " + packet.Length);
-    if (packet[0] != STX)
-    {
-      throw new ArgumentException("Packet must start with STX");
-    }
-    if (tailed && (packet.Length < 3 || packet[^1] != ETB))
-    {
-      throw new ArgumentException("Invalid packet format (tailed)");
-    }
-    if (!tailed && (packet.Length < 4 || packet[^1] != ETX))
-    {
-      throw new ArgumentException("Invalid packet format");
-    }
-
-    if (!tailed)
-    {
-
-      int crIndex = Array.IndexOf(packet, CR, 1);
-      if (crIndex == -1 || crIndex != packet.Length - 2)
-        throw new ArgumentException("Invalid packet format");
-
-      int textLength = crIndex - 1;
-      byte[] textBytes = new byte[textLength];
-      Array.Copy(packet, 1, textBytes, 0, textLength);
-
-      return Encoding.UTF32.GetString(textBytes);
-    }
-    else
-    {
-      int textLength = packet.Length - 2;
-      List<byte> textBytes = [.. packet[1..(1 + textLength)]];
-      return Encoding.UTF32.GetString([.. textBytes]);
-    }
+    nextSequence = 1;
+    currentMessage = "";
+    messageCollections.Clear();
+    packetBuffer.Clear();
   }
-
+  private static void LogPacket(byte[] packet)
+  {
+    string packetString = Encoding.Latin1.GetString(packet);
+    Log.Information("Packet String: " + packetString.Replace("\r", "<CR>").Replace("\n", "<LF>").Replace(((char)STX).ToString(), "<STX>").Replace(((char)ETX).ToString(), "<ETX>").Replace(((char)ETB).ToString(), "<ETB>"));
+  }
   private static string ExtractText(byte[] packet, bool tailed = false)
   {
     if (packet[0] != STX)
@@ -204,7 +99,7 @@ public class Program
       int textLength = crIndex - 1;
       int startIndex = 2;
       List<byte> textBytes = [.. packet[startIndex..(1 + textLength)]];
-      return Encoding.UTF32.GetString([.. textBytes]);
+      return Encoding.Latin1.GetString([.. textBytes]);
     }
     else
     {
@@ -212,34 +107,56 @@ public class Program
       int textLength = etbIndex - 1;
       int startIndex = 2;
       List<byte> textBytes = [.. packet[startIndex..(1 + textLength)]];
-      return Encoding.UTF32.GetString([.. textBytes]);
+      return Encoding.Latin1.GetString([.. textBytes]);
     }
   }
   private static bool IsValidSequence(byte sequence)
   {
-    return (int)sequence == nextSequence;
+    return Encoding.Latin1.GetString([sequence]) == nextSequence.ToString();
   }
   private static string GenerateCheckSum(byte[] packet, byte endtx)
   {
     int indexSTX = Array.IndexOf(packet, STX);
-    int indexENDTX = Array.IndexOf(packet, endtx);
+    int indexENDTX = Array.LastIndexOf(packet, endtx);
+
     if (indexSTX == -1 || indexENDTX == -1 || indexENDTX <= indexSTX)
     {
       throw new ArgumentException("Invalid packet format");
     }
-    List<byte> contentBytes = [.. packet[(indexSTX + 1)..indexENDTX]];
-    string checkSum = (contentBytes.Count % 256).ToString("X2");
+
+    // Content between STX and ENDTX
+    byte[] contentBytes = packet[(indexSTX + 1)..indexENDTX];
+
+    int total = contentBytes.Sum(c => (int)c);
+    string checkSum = (total % 256).ToString("X2");
     return checkSum;
   }
   private static bool IsValidChecksum(byte[] packet, byte endtx)
   {
+    if (packet[^2] != CR || packet[^1] != LF)
+    {
+      return false;
+    }
+
     int indexENDTX = Array.IndexOf(packet, endtx);
+
     List<byte> checkSumBytes = [.. packet.ToArray().Skip(indexENDTX + 1).Take(2)];
-    string receivedCheckSum = Encoding.UTF8.GetString([.. checkSumBytes]);
+
+    string receivedCheckSum = Encoding.Latin1.GetString([.. checkSumBytes]);
     string calculatedCheckSum = GenerateCheckSum(packet, endtx);
 
-    Console.WriteLine("Received Checksum: " + receivedCheckSum);
-    Console.WriteLine("Calculated Checksum: " + calculatedCheckSum);
+    if (!receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase))
+    {
+      if (endtx == ETX)
+      {
+        Console.WriteLine("Error in ETX packet");
+      }
+      else
+      {
+        Console.WriteLine("Error in ETB packet");
+      }
+    }
+
     return receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase);
   }
   private static void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e)
@@ -264,8 +181,7 @@ public class Program
         Console.WriteLine("Transmission ended.");
         string allMessages = string.Join("\n", messageCollections);
         Console.WriteLine("All Messages:\n" + allMessages);
-        messageCollections.Clear();
-        packetBuffer.Clear();
+        Reset();
       }
       else
       {
@@ -276,6 +192,7 @@ public class Program
         {
           try
           {
+            LogPacket([.. packetBuffer]);
             // Get ENDTX is ETX or ETB
             byte endTx = packetBuffer[^5];
             if (endTx != ETX && endTx != ETB)
@@ -295,27 +212,11 @@ public class Program
               Console.WriteLine("Send NAK to Client.");
               return;
             }
-            // if (!IsValidChecksum([.. packetBuffer], endTx))
-            // {
-            //   Console.WriteLine("Invalid checksum.");
-            //   packetBuffer.Clear();
-            //   // sp.Write(new byte[] { NAK }, 0, 1);
-            //   Console.WriteLine("Send NAK to Client.");
-            //   return;
-            // }
-            if (!IsValidChecksumAscii([.. packetBuffer], endTx, Mode.SumMod256, includeEndTx: true))
+            if (!IsValidChecksum([.. packetBuffer], endTx))
             {
-              Console.WriteLine("Invalid ASCII checksum.");
-              if (endTx == ETB)
-              {
-                Console.WriteLine("THIS IS TAILED PACKET");
-              }
-              else if (endTx == ETX)
-              {
-                Console.WriteLine("THIS IS NORMAL PACKET");
-              }
+              Console.WriteLine("Invalid checksum.");
               packetBuffer.Clear();
-              // sp.Write(new byte[] { NAK }, 0, 1);
+              sp.Write(new byte[] { NAK }, 0, 1);
               Console.WriteLine("Send NAK to Client.");
               return;
             }
