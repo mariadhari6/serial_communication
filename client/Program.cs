@@ -41,109 +41,10 @@ public class Program
 
   private static bool running = true;
 
-  public enum Mode
-  {
-    SumMod256, // umum untuk ASTM
-    Xor        // beberapa perangkat pakai BCC (XOR)
-  }
-  private static bool IsValidChecksumAscii(byte[] packet, byte endtx, Mode mode = Mode.SumMod256, bool includeEndTx = true)
-  {
-    if (packet is null || packet.Length == 0) return false;
-
-    int indexSTX = Array.IndexOf(packet, STX);
-    if (indexSTX < 0) return false;
-
-    int indexENDTX = Array.IndexOf(packet, endtx, indexSTX + 1);
-    if (indexENDTX < 0) return false;
-
-    // --- Coba format 2 digit ASCII hex ---
-    if (indexENDTX + 2 < packet.Length &&
-        IsHexAscii(packet[indexENDTX + 1]) &&
-        IsHexAscii(packet[indexENDTX + 2]))
-    {
-      string received = Encoding.ASCII.GetString(packet, indexENDTX + 1, 2);
-      string calculated = GenerateChecksumAscii(packet, endtx, mode, includeEndTx);
-      // Debug (opsional)
-      // Console.WriteLine($"Rx: {received}, Calc: {calculated}");
-      return received.Equals(calculated, StringComparison.OrdinalIgnoreCase);
-    }
-
-    // --- Fallback: 1 byte biner checksum setelah ENDTX ---
-    if (indexENDTX + 1 < packet.Length)
-    {
-      byte receivedByte = packet[indexENDTX + 1];
-      // Hitung byte checksum
-      int acc = 0;
-      int start = indexSTX + 1;
-      int end = includeEndTx ? indexENDTX : indexENDTX - 1;
-      if (end < start) return false;
-
-      if (mode == Mode.Xor)
-      {
-        for (int i = start; i <= end; i++) acc ^= packet[i];
-      }
-      else
-      {
-        for (int i = start; i <= end; i++) acc = (acc + packet[i]) & 0xFF;
-      }
-
-      return receivedByte == (byte)(acc & 0xFF);
-    }
-
-    return false;
-  }
-
-  private static bool IsHexAscii(byte b) =>
-      (b >= (byte)'0' && b <= (byte)'9') ||
-      (b >= (byte)'A' && b <= (byte)'F') ||
-      (b >= (byte)'a' && b <= (byte)'f');
-
-  private static string GenerateChecksumAscii(byte[] packet, byte endtx, Mode mode = Mode.SumMod256, bool includeEndTx = true)
-  {
-
-    ArgumentNullException.ThrowIfNull(packet);
-
-    int indexSTX = Array.IndexOf(packet, STX);
-    if (indexSTX < 0) throw new ArgumentException("STX not found", nameof(packet));
-
-    // Cari ENDTX SETELAH STX
-    int indexENDTX = Array.IndexOf(packet, endtx, indexSTX + 1);
-    if (indexENDTX < 0) throw new ArgumentException("ENDTX not found", nameof(packet));
-
-    int start = indexSTX + 1;
-    int end = includeEndTx ? indexENDTX : indexENDTX - 1;
-    if (end < start) throw new ArgumentException("Invalid packet window");
-
-    int acc = mode == Mode.Xor ? 0 : 0;
-    for (int i = start; i <= end; i++)
-    {
-      if (mode == Mode.Xor)
-        acc ^= packet[i];
-      else
-        acc = (acc + packet[i]) & 0xFF; // low 8-bit sum
-    }
-
-    if (mode == Mode.SumMod256) acc &= 0xFF;
-    return acc.ToString("X2"); // 2 digit hex uppercase
-  }
-
   private static void LogPacket(byte[] packet)
   {
-    int indexETX = Array.IndexOf(packet, ETX);
-    int indexETB = Array.IndexOf(packet, ETB);
-    int indexSequence = Array.IndexOf(packet, STX) + 1;
-    int indexCR = Array.IndexOf(packet, CR);
-    List<byte> CRLFBytes = [.. packet.ToArray().Skip(packet.Length - 2).Take(2)];
-    List<byte> checkSumBytes = [.. packet.ToArray().Skip(Math.Max(indexETX, indexETB) + 1).Take(2)];
-    List<byte> contentBytes = [.. packet.ToArray().Skip(indexSequence + 1).Take((indexCR > 0 ? indexCR : Math.Max(indexETX, indexETB)) - indexSequence - 1)];
-    byte sequenceByte = packet[indexSequence];
-    string content = Encoding.UTF32.GetString([.. contentBytes]);
-    string checkSum = Encoding.ASCII.GetString([.. checkSumBytes]);
-    Log.Information("=== Packet Details ===");
-    Log.Information("Sequence: " + sequenceByte);
-    Log.Information("Content: " + content.Trim());
-    Log.Information("CRLF: " + BitConverter.ToString([.. CRLFBytes.ToArray()]).Replace("-", " "));
-    Log.Information("Checksum: " + checkSum);
+    string packetString = Encoding.Latin1.GetString(packet);
+    Log.Information("Packet String: " + packetString.Replace("\r", "<CR>").Replace("\n", "<LF>").Replace(((char)STX).ToString(), "<STX>").Replace(((char)ETX).ToString(), "<ETX>").Replace(((char)ETB).ToString(), "<ETB>"));
   }
   private static bool IsValidChecksum(byte[] packet, byte endtx)
   {
@@ -151,14 +52,13 @@ public class Program
     {
       return false;
     }
-    int indexLastCR = Array.LastIndexOf(packet, CR);
+
     int indexENDTX = Array.IndexOf(packet, endtx);
-    // List<byte> checkSumBytes = [.. packet.ToArray().Skip(indexENDTX + 1).Take(2)];
-    List<byte> checkSumBytes = [.. packet.ToArray().Skip(indexENDTX + 1).Take(indexLastCR - indexENDTX - 1)];
-    string receivedCheckSum = Encoding.ASCII.GetString([.. checkSumBytes]);
+
+    List<byte> checkSumBytes = [.. packet.ToArray().Skip(indexENDTX + 1).Take(2)];
+
+    string receivedCheckSum = Encoding.Latin1.GetString([.. checkSumBytes]);
     string calculatedCheckSum = GenerateCheckSum(packet, endtx);
-
-
 
     if (!receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase))
     {
@@ -170,12 +70,14 @@ public class Program
       {
         Console.WriteLine("Error in ETB packet");
       }
-      Console.WriteLine("Count Received Checksum Bytes: " + checkSumBytes.Count);
-      Console.WriteLine("Received Checksum: " + receivedCheckSum);
-      Console.WriteLine("Calculated Checksum: " + calculatedCheckSum);
+      Log.Information("=== Checksum Error Details ===");
+      Log.Information("Received Checksum: " + receivedCheckSum);
+      Log.Information("Calculated Checksum: " + calculatedCheckSum);
     }
+
     return receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase);
   }
+
   public static void Main(string[] args)
   {
 
@@ -286,18 +188,21 @@ public class Program
   private static string GenerateCheckSum(byte[] packet, byte endtx)
   {
     int indexSTX = Array.IndexOf(packet, STX);
-    int indexENDTX = Array.IndexOf(packet, endtx);
+    int indexENDTX = Array.LastIndexOf(packet, endtx);
+
     if (indexSTX == -1 || indexENDTX == -1 || indexENDTX <= indexSTX)
     {
       throw new ArgumentException("Invalid packet format");
     }
-    List<byte> contentBytes = [.. packet[(indexSTX + 1)..indexENDTX]];
+
+    // Content between STX and ENDTX
+    byte[] contentBytes = packet[(indexSTX + 1)..indexENDTX];
+
     int total = contentBytes.Sum(c => (int)c);
-    Console.WriteLine("Sum of bytes: " + total);
-    Console.WriteLine("Modulo 256: " + (total % 256));
-    string checkSum = (total % 256).ToString("X2");
+    string checkSum = (total % 256).ToString("X2"); // ✅ always 2-digit uppercase hex
     return checkSum;
   }
+
   private static void SendText(SerialPort sp)
   {
     string? text = GetText();
@@ -316,10 +221,10 @@ public class Program
     }
 
     List<byte> packet;
-    byte[] content = Encoding.UTF32.GetBytes(text);
+    byte[] content = Encoding.Latin1.GetBytes(text);
     string checkSum;
     bool simulationMode = Environment.GetEnvironmentVariable("SIMULATION_MODE") == "true";
-    int currentSequence = sequence;
+    byte currentSequence = Encoding.Latin1.GetBytes(sequence.ToString())[0];
     byte endtx = partition > 0 ? ETB : ETX;
     if (simulationMode && new Random().Next(0, 2) == 0)
     {
@@ -332,16 +237,14 @@ public class Program
     if (partition > 0)
     {
       // [STX][TEXT][ETB]
-      packet = [STX, (byte)currentSequence, .. content, endtx];
+      packet = [STX, currentSequence, .. content, endtx];
       checkSum = GenerateCheckSum([.. packet], endtx);
     }
     else
     {
       // [STX][TEXT][CR][ETX]
-      packet = [STX, (byte)currentSequence, .. content, CR, endtx];
-      Console.WriteLine("Generate Checksum FOR ETX");
+      packet = [STX, currentSequence, .. content, CR, endtx];
       checkSum = GenerateCheckSum([.. packet], endtx);
-      Console.WriteLine("Checksum: " + checkSum);
     }
 
     if (simulationMode && new Random().Next(0, 2) == 0)
@@ -354,9 +257,9 @@ public class Program
     // List<string> checkSumList = [checkSum[0].ToString(), checkSum[1].ToString()];
     // byte[] checkSumBytes = checkSumList.Select(s => (byte)s[0]).ToArray();
 
-    byte[] checkSumBytes = Encoding.ASCII.GetBytes(checkSum);
+    byte[] checkSumBytes = Encoding.Latin1.GetBytes(checkSum);
     packet.AddRange([.. checkSumBytes, CR, LF]);
-    IsValidChecksum([.. packet], endtx);
+    Log.Information("Validating checksum before sending: " + IsValidChecksum(packet.ToArray(), endtx));
 
     sp.Write(packet.ToArray(), 0, packet.Count);
     LogPacket(packet.ToArray());
