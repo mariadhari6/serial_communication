@@ -303,6 +303,14 @@ public class Program
             if (!IsValidChecksumAscii([.. packetBuffer], endTx, Mode.SumMod256, includeEndTx: true))
             {
               Console.WriteLine("Invalid ASCII checksum.");
+              if (endTx == ETB)
+              {
+                Console.WriteLine("THIS IS TAILED PACKET");
+              }
+              else if (endTx == ETX)
+              {
+                Console.WriteLine("THIS IS NORMAL PACKET");
+              }
               packetBuffer.Clear();
               // sp.Write(new byte[] { NAK }, 0, 1);
               Console.WriteLine("Send NAK to Client.");
