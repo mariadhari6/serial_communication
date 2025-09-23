@@ -145,6 +145,10 @@ public class Program
     string receivedCheckSum = Encoding.Latin1.GetString([.. checkSumBytes]);
     string calculatedCheckSum = GenerateCheckSum(packet, endtx);
 
+    Log.Information("===Checksum Validation===");
+    Log.Information("Calculated Checksum: " + calculatedCheckSum);
+    Log.Information("Received Checksum: " + receivedCheckSum);
+
     if (!receivedCheckSum.Equals(calculatedCheckSum, StringComparison.OrdinalIgnoreCase))
     {
       if (endtx == ETX)
