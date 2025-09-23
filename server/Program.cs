@@ -125,9 +125,10 @@ public class Program
     }
 
     // Content between STX and ENDTX
-    byte[] contentBytes = packet[(indexSTX + 1)..(indexENDTX - 1)];
+    byte[] contentBytes = packet[(indexSTX + 1)..indexENDTX];
 
     int total = contentBytes.Sum(c => (int)c);
+    Log.Information("Total Bytes: " + total);
     string checkSum = (total % 256).ToString("X2");
     return checkSum;
   }
