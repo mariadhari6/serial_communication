@@ -125,7 +125,7 @@ public class Program
     }
 
     // Content between STX and ENDTX
-    byte[] contentBytes = packet[(indexSTX + 1)..indexENDTX];
+    byte[] contentBytes = packet[(indexSTX + 1)..(indexENDTX + 1)];
     string contentString = Encoding.Latin1.GetString(contentBytes);
     Log.Information("Index ENDTX: " + indexENDTX);
     Log.Information("Content String: " + contentString);
