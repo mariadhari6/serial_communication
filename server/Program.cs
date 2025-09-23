@@ -126,9 +126,11 @@ public class Program
 
     // Content between STX and ENDTX
     byte[] contentBytes = packet[(indexSTX + 1)..indexENDTX];
+    string contentString = Encoding.Latin1.GetString(contentBytes);
+    Log.Information("Content String: " + contentString);
+    Log.Information("Content Length: " + contentString.Length);
 
     int total = contentBytes.Sum(c => (int)c);
-    Log.Information("Total Bytes: " + total);
     string checkSum = (total % 256).ToString("X2");
     return checkSum;
   }
